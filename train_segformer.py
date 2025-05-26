@@ -48,13 +48,13 @@ def train(args):
                                 target_transform=val_transform2,
                                 download=True)
     if args.dataset == "city":
-        train_data = CityscapesCustom(root="path_to_dataset", 
+        train_data = CityscapesCustom(root="data/cityscapes_assg2", 
                                 split="train",
                                 mode="fine",
                                 target_type='semantic', 
                                 transform=train_transform,
                                 target_transform=train_transform2)
-        val_data = CityscapesCustom(root="/data/databases/cityscapes", 
+        val_data = CityscapesCustom(root="data/cityscapes_assg2", 
                                 split="val",
                                 mode="fine",
                                 target_type='semantic', 

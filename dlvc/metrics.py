@@ -46,8 +46,10 @@ class SegMetrics(PerformanceMeasure):
         '''
         Resets the internal state.
         '''
-        ## TODO implement
-        pass
+        self.num_classes = len(self.classes)
+        
+        self._cm = torch.zeros(self.num_classes, self.num_classes,
+                               dtype=torch.int64)
 
 
 
@@ -61,8 +63,30 @@ class SegMetrics(PerformanceMeasure):
         Make sure to not include pixels of value 255 in the calculation since those are to be ignored. 
         '''
 
-       ##TODO implement
-        pass
+        if prediction.ndim != 4:
+            raise ValueError("prediction must have shape (B,C,H,W)")
+        if target.ndim != 3:
+            raise ValueError("target must have shape (B,H,W)")
+        if prediction.shape[0] != target.shape[0] \
+           or prediction.shape[2:] != target.shape[1:]:
+            raise ValueError("prediction and target shape mismatch")
+
+        # -------- logits → class-ids --------------------------------------
+        pred_ids = prediction.argmax(dim=1).to(torch.int64)   # (B,H,W)
+
+        # -------- ignore void label (255) -------------------------------
+        mask = (target != 255)
+        pred_ids = pred_ids[mask]
+        tgt_ids  = target[mask].to(torch.int64)
+
+        # -------- accumulate confusion-matrix -----------------------------
+        # map (gt, pred) pairs to a 1-D index:  idx = gt * C + pred
+        idx = tgt_ids * self.num_classes + pred_ids
+        bincount = torch.bincount(idx,
+                                  minlength=self.num_classes**2)
+
+        self._cm += bincount.reshape(self.num_classes, self.num_classes)
+
    
 
     def __str__(self):
@@ -70,8 +94,7 @@ class SegMetrics(PerformanceMeasure):
         Return a string representation of the performance, mean IoU.
         e.g. "mIou: 0.54"
         '''
-        ##TODO implement
-        pass
+        return f"mIoU: {self.mIoU():.4f}"
           
 
     
@@ -82,8 +105,19 @@ class SegMetrics(PerformanceMeasure):
         If the denominator for IoU calculation for one of the classes is 0,
         use 0 as IoU for this class.
         '''
-        ##TODO implement
-        pass
+        if self._cm.sum() == 0:
+            return 0.0
+
+        cm = self._cm.to(torch.float32)
+        tp = torch.diag(cm)
+        fp = cm.sum(0) - tp          # predicted as class c but GT ≠ c
+        fn = cm.sum(1) - tp          # GT class c but predicted ≠ c
+        denom = tp + fp + fn
+
+        # avoid division by zero – IoU for such a class counts as 0
+        iou = torch.where(denom > 0, tp / denom, torch.zeros_like(tp))
+
+        return iou.mean().item()
 
 
 
