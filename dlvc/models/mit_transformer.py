@@ -158,13 +158,16 @@ class Block(nn.Module):
     def forward(self, x, H, W):
         #TODO implement the forward pass of one Transformer block
         # follow the instruction line by line
-        x1 = ...# apply self.norm1 to x
-        x1 = ...# apply self.attn to x1
-        x1 = x + self.drop_path(x1)
-        x2 = ...# apply self.norm2 to x1
-        x2 = ...# apply self.mlp to x2
-        x2 = x1 + self.drop_path(x2)
-        return x2
+        x1 = self.norm1(x)                 # layer norm
+        x1 = self.attn(x1, H, W)           # MHSA with spatial reduction
+        x1 = x + self.drop_path(x1)        # residual connection
+
+        # 2) MLP branch
+        x2 = self.norm2(x1)
+        x2 = self.mlp(x2, H, W)            # DW-conv inside the MLP
+        x2 = x1 + self.drop_path(x2)       # residual connection
+
+        return x2   
 
 class OverlapPatchEmbed(nn.Module):
     """ Image to Patch Embedding
@@ -176,9 +179,11 @@ class OverlapPatchEmbed(nn.Module):
         #TODO implement 
         # compute the new H an W given the original image size and the patchsize 
         # (we only look at quadratic patches meaning patch_size is same for H and W)
-        self.H, self.W = ...
-        # compute the number of patches given the new H and W
-        self.num_patches = ...
+        self.H = math.ceil(img_size / stride)
+        self.W = self.H                      # square image
+
+        # total number of flattened tokens
+        self.num_patches = self.H * self.W
         
         self.proj = nn.Conv2d(in_chans, embed_dim, kernel_size=patch_size, stride=stride,
                               padding=(patch_size // 2, patch_size // 2))

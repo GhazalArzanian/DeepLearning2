@@ -233,6 +233,9 @@ class ImgSemSegTrainer(BaseTrainer):
             if self.wandb_logger is not None:
                 self.wandb_logger.log(log_dict)
 
+    def dispose(self):
+        self.wandb_logger.finish()
+
                 
 
 
