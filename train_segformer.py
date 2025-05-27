@@ -62,18 +62,25 @@ def train(args):
                                 target_transform=val_transform2)
 
 
-    device = ...
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     model = DeepSegmenter(...)
     # If you are in the fine-tuning phase:
-    if args.dataset == 'oxford':
-        ##TODO update the encoder weights of the model with the loaded weights of the pretrained model
-        # e.g. load pretrained weights with: state_dict = torch.load("path to model", map_location='cpu')
-        ...
-        ##
-    model.to(device)
-    optimizer = ...
-    loss_fn = ... # remember to ignore label value 255 when training with the Cityscapes datset
+    if args.dataset == 'oxford' and args.encoder_checkpoint:
+        state_dict = torch.load(args.encoder_checkpoint, map_location='cpu')
+        # keep only the encoder weights (they all start with "encoder.")
+        encoder_weights = {k: v for k, v in state_dict.items() if k.startswith('encoder')}
+        missing, unexpected = model.net.load_state_dict(encoder_weights, strict=False)
+        print(f"Loaded encoder weights.  Missing: {len(missing)}  |  Unexpected: {len(unexpected)}")
+
+    num_classes = 3 if args.dataset == "oxford" else 19
+    segformer = SegFormer(num_classes=num_classes)
+    model = DeepSegmenter(segformer).to(device)
+
+    optimizer = optimizer = torch.optim.AdamW(model.parameters(),
+                                  lr=1e-3,
+                                  amsgrad=True)
+    loss_fn = torch.nn.CrossEntropyLoss(ignore_index=255)
     
     train_metric = SegMetrics(classes=train_data.classes_seg)
     val_metric = SegMetrics(classes=val_data.classes_seg)
@@ -82,7 +89,8 @@ def train(args):
     model_save_dir = Path("saved_models")
     model_save_dir.mkdir(exist_ok=True)
 
-    lr_scheduler = ...
+    lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer,
+                                                          gamma=0.98)
     
     trainer = ImgSemSegTrainer(model, 
                     optimizer,
@@ -106,12 +114,18 @@ if __name__ == "__main__":
     args = argparse.ArgumentParser(description='Training')
     args.add_argument('-d', '--gpu_id', default='0', type=str,
                       help='index of which GPU to use')
+    args.add_argument('--dataset', choices=['city', 'oxford'], default='city',
+                  help="which dataset to train on")
+    args.add_argument('--encoder_checkpoint', type=str, default='',
+                    help="path to a .pth file with pretrained SegFormer encoder "
+                        "(used only when --dataset oxford)")
+    args.add_argument("--num_epochs", type=int, default=31)
     
     if not isinstance(args, tuple):
         args = args.parse_args()
     os.environ['CUDA_VISIBLE_DEVICES'] = str(args.gpu_id)
     args.gpu_id = 0
-    args.num_epochs = 31
-    args.dataset = "oxford"
+    #args.num_epochs = 31
+
 
     train(args)
