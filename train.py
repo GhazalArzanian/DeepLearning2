@@ -61,7 +61,7 @@ def train(args):
                                   lr=1e-3,
                                   amsgrad=True)
 
-    loss_fn = loss_fn = torch.nn.CrossEntropyLoss(ignore_index=255)
+    loss_fn = loss_fn = torch.nn.CrossEntropyLoss()#ignore_index=255
     
     train_metric = SegMetrics(classes=train_data.classes_seg)
     val_metric = SegMetrics(classes=val_data.classes_seg)

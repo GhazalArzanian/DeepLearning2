@@ -98,10 +98,10 @@ class ImgSemSegTrainer(BaseTrainer):
         # ─── data loaders ───────────────────────────────────────────────
         self.train_data_loader = torch.utils.data.DataLoader(
             train_data, batch_size=batch_size, shuffle=True,
-            num_workers=2, pin_memory=True)
+            num_workers=3, pin_memory=True)
         self.val_data_loader = torch.utils.data.DataLoader(
             val_data, batch_size=batch_size, shuffle=False,
-            num_workers=1, pin_memory=True)
+            num_workers=2, pin_memory=True)
 
         self.num_train_data = len(train_data)
         self.num_val_data   = len(val_data)
