@@ -10,6 +10,7 @@ from dlvc.models.segment_model import DeepSegmenter
 from dlvc.dataset.oxfordpets import  OxfordPetsCustom
 from dlvc.metrics import SegMetrics
 from dlvc.trainer import ImgSemSegTrainer
+from torchvision.models import ResNet50_Weights
 
 
 
@@ -47,11 +48,20 @@ def train(args):
 
 
 
-    device = ...
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    model = DeepSegmenter(...)
-    optimizer = ...
-    loss_fn = ...
+
+    backbone_weights = ResNet50_Weights.DEFAULT if args.pretrained_backbone else None
+    fcn = fcn_resnet50(num_classes=3,       # pet, background, border
+                       weights=None,
+                       weights_backbone=backbone_weights)
+    model = DeepSegmenter(fcn).to(device)
+
+    optimizer = optimizer = torch.optim.AdamW(model.parameters(),
+                                  lr=1e-3,
+                                  amsgrad=True)
+
+    loss_fn = loss_fn = torch.nn.CrossEntropyLoss(ignore_index=255)
     
     train_metric = SegMetrics(classes=train_data.classes_seg)
     val_metric = SegMetrics(classes=val_data.classes_seg)
@@ -60,7 +70,8 @@ def train(args):
     model_save_dir = Path("saved_models")
     model_save_dir.mkdir(exist_ok=True)
 
-    lr_scheduler = ...
+    lr_scheduler = lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer,
+                                                          gamma=0.98)
     
     trainer = ImgSemSegTrainer(model, 
                     optimizer,
@@ -85,7 +96,10 @@ if __name__ == "__main__":
     args = argparse.ArgumentParser(description='Training')
     args.add_argument('-d', '--gpu_id', default='0', type=str,
                       help='index of which GPU to use')
-    
+    args.add_argument('--pretrained_backbone', action='store_true',
+                  help='use ImageNet weights for the ResNet-50 encoder')
+    args.add_argument("--num_epochs", type=int, default=31)
+
     if not isinstance(args, tuple):
         args = args.parse_args()
     os.environ['CUDA_VISIBLE_DEVICES'] = str(args.gpu_id)
