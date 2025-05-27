@@ -34,14 +34,14 @@ def train(args):
                             v2.Resize(size=(64,64), interpolation=v2.InterpolationMode.NEAREST)])
 
     if args.dataset == "oxford":
-        train_data = OxfordPetsCustom(root="path_to_dataset", 
+        train_data = OxfordPetsCustom(root="data\oxford-iiit-pet", 
                                 split="trainval",
                                 target_types='segmentation', 
                                 transform=train_transform,
                                 target_transform=train_transform2,
                                 download=True)
 
-        val_data = OxfordPetsCustom(root="path_to_dataset", 
+        val_data = OxfordPetsCustom(root="data\oxford-iiit-pet", 
                                 split="test",
                                 target_types='segmentation', 
                                 transform=val_transform,
@@ -64,21 +64,32 @@ def train(args):
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    model = DeepSegmenter(...)
-    # If you are in the fine-tuning phase:
-    if args.dataset == 'oxford' and args.encoder_checkpoint:
-        state_dict = torch.load(args.encoder_checkpoint, map_location='cpu')
-        # keep only the encoder weights (they all start with "encoder.")
-        encoder_weights = {k: v for k, v in state_dict.items() if k.startswith('encoder')}
-        missing, unexpected = model.net.load_state_dict(encoder_weights, strict=False)
-        print(f"Loaded encoder weights.  Missing: {len(missing)}  |  Unexpected: {len(unexpected)}")
-
     num_classes = 3 if args.dataset == "oxford" else 19
+
+    # create fresh SegFormer
     segformer = SegFormer(num_classes=num_classes)
+
+    # if fine-tuning on Oxford, optionally load encoder checkpoint
+    if args.dataset == 'oxford' and args.encoder_checkpoint:
+        sd = torch.load(args.encoder_checkpoint, map_location='cpu')
+        # keys from DeepSegmenter.save() are 'net.encoder.*', so strip 'net.encoder.'
+        enc_sd = {k.replace('net.encoder.', ''): v
+                  for k, v in sd.items() if k.startswith('net.encoder')}
+        segformer.encoder.load_state_dict(enc_sd, strict=False)
+        print(f"Loaded encoder weights from {args.encoder_checkpoint}")
+
+        if args.freeze_encoder:
+            for p in segformer.encoder.parameters():
+                p.requires_grad = False
+            print("Encoder frozen; training decoder only")
+
+    # wrap and move everything to device
     model = DeepSegmenter(segformer).to(device)
 
+    base_lr = 1e-3
+    lr = args.lr_finetune if (args.dataset == "oxford" and args.lr_finetune) else base_lr
     optimizer = optimizer = torch.optim.AdamW(model.parameters(),
-                                  lr=1e-3,
+                                  lr=lr,
                                   amsgrad=True)
     loss_fn = torch.nn.CrossEntropyLoss(ignore_index=255)
     
@@ -119,6 +130,10 @@ if __name__ == "__main__":
     args.add_argument('--encoder_checkpoint', type=str, default='',
                     help="path to a .pth file with pretrained SegFormer encoder "
                         "(used only when --dataset oxford)")
+    args.add_argument('--freeze_encoder', action='store_true',
+                      help="when fine-tuning on Oxford, freeze the encoder weights")
+    args.add_argument('--lr_finetune', type=float, default=None,
+                      help="optional lower LR for fine-tuning (defaults to --lr or half)")
     args.add_argument("--num_epochs", type=int, default=31)
     
     if not isinstance(args, tuple):
