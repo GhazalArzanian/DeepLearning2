@@ -34,14 +34,14 @@ def train(args):
                             v2.Resize(size=(64,64), interpolation=v2.InterpolationMode.NEAREST)])
 
     if args.dataset == "oxford":
-        train_data = OxfordPetsCustom(root="data\oxford-iiit-pet", 
+        train_data = OxfordPetsCustom(root="data", 
                                 split="trainval",
                                 target_types='segmentation', 
                                 transform=train_transform,
                                 target_transform=train_transform2,
                                 download=True)
 
-        val_data = OxfordPetsCustom(root="data\oxford-iiit-pet", 
+        val_data = OxfordPetsCustom(root="data", 
                                 split="test",
                                 target_types='segmentation', 
                                 transform=val_transform,
@@ -62,36 +62,36 @@ def train(args):
                                 target_transform=val_transform2)
 
 
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    num_classes = 3 if args.dataset == "oxford" else 19
+    num_classes = len(train_data.classes_seg)  # 3 for pets, 19 for cityscapes
+    backbone = SegFormer(num_classes=num_classes)  # b0: light & fast
+    model = DeepSegmenter(backbone)
+    # If you are in the fine-tuning phase:
+    if args.dataset == 'oxford' and args.pretrained is not None:
+        # load weights that were pre-trained on Cityscapes
+        full_state = torch.load(args.pretrained, map_location='cpu')
 
-    # create fresh SegFormer
-    segformer = SegFormer(num_classes=num_classes)
+        # keep only encoder weights  (keys start with "net.encoder.")
+        enc_state = {k.replace('net.encoder.', ''): v
+                    for k, v in full_state.items() if k.startswith('net.encoder.')}
 
-    # if fine-tuning on Oxford, optionally load encoder checkpoint
-    if args.dataset == 'oxford' and args.encoder_checkpoint:
-        sd = torch.load(args.encoder_checkpoint, map_location='cpu')
-        # keys from DeepSegmenter.save() are 'net.encoder.*', so strip 'net.encoder.'
-        enc_sd = {k.replace('net.encoder.', ''): v
-                  for k, v in sd.items() if k.startswith('net.encoder')}
-        segformer.encoder.load_state_dict(enc_sd, strict=False)
-        print(f"Loaded encoder weights from {args.encoder_checkpoint}")
+        missing, unexpected = model.net.encoder.load_state_dict(enc_state, strict=False)
+        print(f'Loaded encoder  (missing={len(missing)}, unexpected={len(unexpected)})')
 
         if args.freeze_encoder:
-            for p in segformer.encoder.parameters():
-                p.requires_grad = False
-            print("Encoder frozen; training decoder only")
+            model.net.encoder.requires_grad_(False)
+        ##
+    model.to(device)
 
-    # wrap and move everything to device
-    model = DeepSegmenter(segformer).to(device)
+    lr = 0.001
+    params_to_opt = filter(lambda p: p.requires_grad, model.parameters())
+    optimizer = torch.optim.AdamW(params_to_opt, lr=lr, amsgrad=True)
 
-    base_lr = 1e-3
-    lr = args.lr_finetune if (args.dataset == "oxford" and args.lr_finetune) else base_lr
-    optimizer = optimizer = torch.optim.AdamW(model.parameters(),
-                                  lr=lr,
-                                  amsgrad=True)
-    loss_fn = torch.nn.CrossEntropyLoss(ignore_index=255)
+
+    ignore_val = 255 if args.dataset == "city" else -100
+
+    loss_fn = torch.nn.CrossEntropyLoss(ignore_index=ignore_val)
     
     train_metric = SegMetrics(classes=train_data.classes_seg)
     val_metric = SegMetrics(classes=val_data.classes_seg)
@@ -100,8 +100,7 @@ def train(args):
     model_save_dir = Path("saved_models")
     model_save_dir.mkdir(exist_ok=True)
 
-    lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer,
-                                                          gamma=0.98)
+    lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.98)
     
     trainer = ImgSemSegTrainer(model, 
                     optimizer,
@@ -121,26 +120,28 @@ def train(args):
     # just comment if not used
     trainer.dispose() 
 
+    if args.model_out is not None:
+        torch.save(model.state_dict(), args.model_out)
+        print(f'\nModel saved ➜  {args.model_out}')
+
 if __name__ == "__main__":
     args = argparse.ArgumentParser(description='Training')
     args.add_argument('-d', '--gpu_id', default='0', type=str,
                       help='index of which GPU to use')
-    args.add_argument('--dataset', choices=['city', 'oxford'], default='city',
-                  help="which dataset to train on")
-    args.add_argument('--encoder_checkpoint', type=str, default='',
-                    help="path to a .pth file with pretrained SegFormer encoder "
-                        "(used only when --dataset oxford)")
-    args.add_argument('--freeze_encoder', action='store_true',
-                      help="when fine-tuning on Oxford, freeze the encoder weights")
-    args.add_argument('--lr_finetune', type=float, default=None,
-                      help="optional lower LR for fine-tuning (defaults to --lr or half)")
-    args.add_argument("--num_epochs", type=int, default=31)
     
+    
+    args.add_argument('--num_epochs', type=int, default=31)
+    args.add_argument('--dataset', choices=['oxford', 'city'],
+                  default='oxford', help='training stage / data set')
+    args.add_argument('--pretrained', type=str, default=None,
+                  help='path to encoder weights (City-pretrained).  Leave empty to train from scratch.')
+    args.add_argument('--freeze_encoder', action='store_true',
+                  help='freeze the encoder during Oxford fine-tune (Part 6b)')
+    args.add_argument('--model_out', type=str, default=None,
+                  help='where to save the final model state_dict after training')
     if not isinstance(args, tuple):
         args = args.parse_args()
     os.environ['CUDA_VISIBLE_DEVICES'] = str(args.gpu_id)
     args.gpu_id = 0
-    #args.num_epochs = 31
-
 
     train(args)
