@@ -64,27 +64,32 @@ def train(args):
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    num_classes = len(train_data.classes_seg)  # 3 for pets, 19 for cityscapes
-    backbone = SegFormer(num_classes=num_classes)  # b0: light & fast
+    num_classes = len(train_data.classes_seg)
+    backbone = SegFormer(num_classes=num_classes)
     model = DeepSegmenter(backbone)
     # If you are in the fine-tuning phase:
     if args.dataset == 'oxford' and args.pretrained is not None:
-        # load weights that were pre-trained on Cityscapes
         full_state = torch.load(args.pretrained, map_location='cpu')
+        if any(k.startswith('net.encoder.') for k in full_state):
+            prefix = 'net.encoder.'
+        elif any(k.startswith('encoder.') for k in full_state):
+            prefix = 'encoder.'
+        else:
+            raise RuntimeError("no encoder weights found")
 
-        # keep only encoder weights  (keys start with "net.encoder.")
-        enc_state = {k.replace('net.encoder.', ''): v
-                    for k, v in full_state.items() if k.startswith('net.encoder.')}
+        enc_state = {k.replace(prefix, ''): v
+                    for k, v in full_state.items() if k.startswith(prefix)}
 
         missing, unexpected = model.net.encoder.load_state_dict(enc_state, strict=False)
-        print(f'Loaded encoder  (missing={len(missing)}, unexpected={len(unexpected)})')
+        print(f"{len(enc_state) - len(missing)} tensors loaded, "
+            f"{len(missing)} missing, {len(unexpected)} unexpected")
 
         if args.freeze_encoder:
             model.net.encoder.requires_grad_(False)
-        ##
+
     model.to(device)
 
-    lr = 0.001
+    lr = 0.0001
     params_to_opt = filter(lambda p: p.requires_grad, model.parameters())
     optimizer = torch.optim.AdamW(params_to_opt, lr=lr, amsgrad=True)
 
@@ -132,13 +137,13 @@ if __name__ == "__main__":
     
     args.add_argument('--num_epochs', type=int, default=31)
     args.add_argument('--dataset', choices=['oxford', 'city'],
-                  default='oxford', help='training stage / data set')
+                  default='oxford', help='data set')
     args.add_argument('--pretrained', type=str, default=None,
-                  help='path to encoder weights (City-pretrained).  Leave empty to train from scratch.')
+                  help='path to encoder weights')
     args.add_argument('--freeze_encoder', action='store_true',
-                  help='freeze the encoder during Oxford fine-tune (Part 6b)')
+                  help='freeze encoder during finetune')
     args.add_argument('--model_out', type=str, default=None,
-                  help='where to save the final model state_dict after training')
+                  help='save model with custom name')
     if not isinstance(args, tuple):
         args = args.parse_args()
     os.environ['CUDA_VISIBLE_DEVICES'] = str(args.gpu_id)

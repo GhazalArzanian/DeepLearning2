@@ -52,7 +52,7 @@ def train(args):
 
 
     backbone_weights = ResNet50_Weights.DEFAULT if args.pretrained_backbone else None
-    fcn = fcn_resnet50(num_classes=3,       # pet, background, border
+    fcn = fcn_resnet50(num_classes=3,
                        weights=None,
                        weights_backbone=backbone_weights)
     model = DeepSegmenter(fcn).to(device)
@@ -61,7 +61,7 @@ def train(args):
                                   lr=1e-3,
                                   amsgrad=True)
 
-    loss_fn = loss_fn = torch.nn.CrossEntropyLoss()#ignore_index=255
+    loss_fn = loss_fn = torch.nn.CrossEntropyLoss()
     
     train_metric = SegMetrics(classes=train_data.classes_seg)
     val_metric = SegMetrics(classes=val_data.classes_seg)

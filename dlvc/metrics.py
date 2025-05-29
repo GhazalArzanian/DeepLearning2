@@ -71,16 +71,12 @@ class SegMetrics(PerformanceMeasure):
            or prediction.shape[2:] != target.shape[1:]:
             raise ValueError("prediction and target shape mismatch")
 
-        # -------- logits → class-ids --------------------------------------
-        pred_ids = prediction.argmax(dim=1).to(torch.int64)   # (B,H,W)
+        pred_ids = prediction.argmax(dim=1).to(torch.int64)
 
-        # -------- ignore void label (255) -------------------------------
         mask = (target != 255)
         pred_ids = pred_ids[mask]
         tgt_ids  = target[mask].to(torch.int64)
 
-        # -------- accumulate confusion-matrix -----------------------------
-        # map (gt, pred) pairs to a 1-D index:  idx = gt * C + pred
         idx = tgt_ids * self.num_classes + pred_ids
         bincount = torch.bincount(idx,
                                   minlength=self.num_classes**2)
@@ -110,11 +106,10 @@ class SegMetrics(PerformanceMeasure):
 
         cm = self._cm.to(torch.float32)
         tp = torch.diag(cm)
-        fp = cm.sum(0) - tp          # predicted as class c but GT ≠ c
-        fn = cm.sum(1) - tp          # GT class c but predicted ≠ c
+        fp = cm.sum(0) - tp
+        fn = cm.sum(1) - tp
         denom = tp + fp + fn
 
-        # avoid division by zero – IoU for such a class counts as 0
         iou = torch.where(denom > 0, tp / denom, torch.zeros_like(tp))
 
         return iou.mean().item()

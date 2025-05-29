@@ -92,21 +92,18 @@ class ImgSemSegTrainer(BaseTrainer):
         self.train_metric   = train_metric
         self.val_metric     = val_metric
 
-        # Oxford-IIIT-Pet masks start at 1, Cityscapes at 0
         self.subtract_one = isinstance(train_data, OxfordPetsCustom)
 
-        # ─── data loaders ───────────────────────────────────────────────
         self.train_data_loader = torch.utils.data.DataLoader(
             train_data, batch_size=batch_size, shuffle=True,
-            num_workers=3, pin_memory=True)
+            num_workers=2, pin_memory=True)
         self.val_data_loader = torch.utils.data.DataLoader(
             val_data, batch_size=batch_size, shuffle=False,
-            num_workers=2, pin_memory=True)
+            num_workers=1, pin_memory=True)
 
         self.num_train_data = len(train_data)
         self.num_val_data   = len(val_data)
 
-        # ─── checkpoint & optional W&B logger ───────────────────────────
         self.checkpoint_dir = training_save_dir
         self.checkpoint_dir.mkdir(exist_ok=True)
 
@@ -140,7 +137,7 @@ class ImgSemSegTrainer(BaseTrainer):
             batch_size = inputs.size(0)
 
             outputs = self.model(inputs.to(self.device))
-            if isinstance(outputs, collections.OrderedDict):   # torchvision FCN
+            if isinstance(outputs, collections.OrderedDict):
                 outputs = outputs['out']
 
             loss = self.loss_fn(outputs, labels.to(self.device))
@@ -213,20 +210,17 @@ class ImgSemSegTrainer(BaseTrainer):
                         'train/loss': train_loss,
                         'train/mIoU': train_miou}
 
-            # run validation only at the chosen frequency (or last epoch)
             if epoch_idx % self.val_frequency == 0 or epoch_idx == self.num_epochs - 1:
                 val_loss, val_miou = self._val_epoch(epoch_idx)
                 log_dict.update({'val/loss': val_loss,
                                  'val/mIoU': val_miou})
 
-                # save best model
                 if val_miou >= best_miou:
                     best_miou = val_miou
                     print(f"#### best mIoU so far: {best_miou:.4f}")
                     print(f"#### saving checkpoint → {self.checkpoint_dir}")
                     self.model.save(Path(self.checkpoint_dir), suffix="best")
 
-                # always save final weights
                 if epoch_idx == self.num_epochs - 1:
                     self.model.save(Path(self.checkpoint_dir), suffix="last")
 
